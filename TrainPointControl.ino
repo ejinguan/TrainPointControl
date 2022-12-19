@@ -22,18 +22,10 @@ unsigned long lngCurrentMillis = 0;
 //#define _pin_btn3 16 /*A2*/
 //#define _pin_btn4 17 /*A3*/
 
-boolean _btn1_raw; // pin input
-boolean _btn2_raw; // pin input
-boolean _btn1; // state
-boolean _btn2; // state
-boolean _btn1_last; // state
-boolean _btn2_last; // state
-//boolean _btn3;
-//boolean _btn4;
-unsigned long lngBtn1Millis = 0;
-unsigned long lngBtn2Millis = 0;
-//unsigned long lngBtn3Millis = 0;
-//unsigned long lngBtn4Millis = 0;
+// Define and initialize Button objects
+Button _btn1(_pin_btn1, _debounce);
+Button _btn2(_pin_btn2, _debounce);
+
 
 /* I2C Command Processing *******************************/
 
@@ -112,8 +104,7 @@ void setup() {
   // Set all button inputs to INPUT PULLUP
   pinMode(_pin_btn1, INPUT_PULLUP);
   pinMode(_pin_btn2, INPUT_PULLUP);
-  //pinMode(_pin_btn3, INPUT_PULLUP);
-  //pinMode(_pin_btn4, INPUT_PULLUP);
+  // Initialized in Button class
 
   // Reset points to THROUGH
   P1command(DIVERT);
@@ -140,51 +131,32 @@ void loop() {
   }
 
   // Read all the digital pins, check for debounce before appending command
-  _btn1_raw = digitalRead(_pin_btn1);
-  _btn1_raw = digitalRead(_pin_btn2);
-
-  // Check pin depending on when it's presed
-  if (lngCurrentMillis > lngBtn1Millis + _debounce) { 
-    if (_btn1_raw == LOW) {
-      _btn1 = LOW;
-    } else if (_btn1_raw == HIGH) {
-      _btn1 = HIGH;
-    }
-    if (_btn1 != _btn1_last) lngBtn1Millis = lngCurrentMillis;
-  }
-  
-  if (lngCurrentMillis > lngBtn2Millis + _debounce) { 
-    if (_btn2_raw == LOW) {
-      _btn2 = LOW;
-    } else if (_btn2_raw == HIGH) {
-      _btn2 = HIGH;
-    }
-    if (_btn2 != _btn2_last) lngBtn2Millis = lngCurrentMillis;
-  }
+  _btn1.Update();
+  _btn2.Update();
 
   // Action based on state change
-  if (_btn1 == LOW && _btn1_last == HIGH) { 
+  if (_btn1.JustChanged() && _btn1.Status() == LOW) {
     if (_p1state==DIVERT) {
       strCommandBuffer += "p1t\n";
     } else { // is THROUGH
       strCommandBuffer += "p1d\n";
     }
   } 
-  if (_btn2 == LOW && _btn2_last == HIGH) { 
+  if (_btn2.JustChanged() && _btn2.Status() == LOW) {
     if (_p2state==DIVERT) {
       strCommandBuffer += "p2t\n";
     } else { // is THROUGH
       strCommandBuffer += "p2d\n";
     }
   }
-  _btn1_last = _btn1;
-  _btn2_last = _btn2;
 
-  Serial.print(_btn2_raw);
+  Serial.print(_btn1.Status());
   Serial.print(",");
-  Serial.print(_btn1);
+  Serial.print(_btn1.JustChanged());
   Serial.print(",");
-  Serial.println(_btn1_last);
+  Serial.print(_btn2.Status());
+  Serial.print(",");
+  Serial.println(_btn2.JustChanged());
 
 
   // Ensure that the buffer is terminated with \n
