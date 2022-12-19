@@ -51,6 +51,9 @@ boolean bP12interlocked = false;
 boolean bLEDOn = false;
 unsigned long lngLEDOnMillis = 0;
 
+// 8 bit LED register to indicate turnout direction
+byte _LEDstate; 
+
 
 /* Output Processing ************************************/
 
@@ -66,6 +69,10 @@ unsigned long lngLEDOnMillis = 0;
 #define _pin_p2b_d 5
 
 #define _pulsetime 50 /*ms*/
+
+#define _shiftDATA 2
+#define _shiftCLOCK 3
+#define _shiftLATCH 4
 
 
 
@@ -101,6 +108,11 @@ void setup() {
   pinMode(_pin_p2b_t, OUTPUT);
   pinMode(_pin_p2b_d, OUTPUT);
 
+  // Set all Shift Register pins to OUTPUT
+  pinMode(_shiftDATA, OUTPUT);
+  pinMode(_shiftCLOCK, OUTPUT);
+  pinMode(_shiftLATCH, OUTPUT);
+
   // Set all button inputs to INPUT PULLUP
   pinMode(_pin_btn1, INPUT_PULLUP);
   pinMode(_pin_btn2, INPUT_PULLUP);
@@ -109,9 +121,11 @@ void setup() {
   // Reset points to THROUGH
   P1command(DIVERT);
   P2command(DIVERT);
+  UpdateLEDs();
   delay(1000); // 1 sec
   P1command(THROUGH);
   P2command(THROUGH);
+  UpdateLEDs();
   delay(1000); // 1 sec
 
   Serial.begin(9600);
@@ -213,6 +227,8 @@ void loop() {
     lngLEDOnMillis = millis();
     digitalWrite(LED_BUILTIN, HIGH);
     bLEDOn = true;    
+
+    UpdateLEDs();
   }
 
 
@@ -259,6 +275,10 @@ void P1command(boolean command) {
       digitalWrite(_pin_p1b_t, LOW);
       delay(_pulsetime);
       _p1state = DIVERT;
+
+      bitClear(_LEDstate, 0);
+      bitSet(_LEDstate, 1);
+      bitClear(_LEDstate, 2);
       
   } else if (command==THROUGH) {    
       // Pulse the THROUGH pins
@@ -273,8 +293,14 @@ void P1command(boolean command) {
       digitalWrite(_pin_p1b_d, LOW);
       delay(_pulsetime);
       _p1state = THROUGH;
+
+      bitSet(_LEDstate, 0);
+      bitClear(_LEDstate, 1);
+      bitSet(_LEDstate, 2);
       
   }
+  
+  UpdateLEDs();
 }
 void P2command(boolean command) {
   if (command==DIVERT) {
@@ -290,6 +316,10 @@ void P2command(boolean command) {
       digitalWrite(_pin_p2b_t, LOW);
       delay(_pulsetime);
       _p2state = DIVERT;
+
+      bitClear(_LEDstate, 3);
+      bitSet(_LEDstate, 4);
+      bitClear(_LEDstate, 5);
       
   } else if (command==THROUGH) {     
       // Pulse the THROUGH pins
@@ -305,5 +335,27 @@ void P2command(boolean command) {
       delay(_pulsetime);
       _p2state = THROUGH;
       
+      bitSet(_LEDstate, 3);
+      bitClear(_LEDstate, 4);
+      bitSet(_LEDstate, 5);
+      
   }
+  
+  UpdateLEDs();
+}
+
+// Update LEDs via shift register
+void UpdateLEDs() {
+  
+  digitalWrite(_shiftCLOCK, LOW); 
+  digitalWrite(_shiftLATCH, LOW);
+
+  // Shift out MSB first as outputs are 0-5
+  shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, _LEDstate);
+
+  digitalWrite(_shiftCLOCK, LOW);  
+  digitalWrite(_shiftLATCH, HIGH);
+  delay(10);
+  digitalWrite(_shiftLATCH, LOW);  
+
 }
