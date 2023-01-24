@@ -29,14 +29,21 @@ Button _btn2(_pin_btn2, _debounce);
 
 /* I2C Command Processing *******************************/
 
+#define I2Caddress 12
+
 // For incoming data processing
-String strCommand;          // for current command data
-String strCommandBuffer;    // for all incoming command data
+String strSerialCommand;      // for current command data
+String strI2CCommand;         // for all incoming command data
+
+String strCommand;            // Current command for processing
 
 
 /* State Processing *************************************/
 
-CommandQueue queue();
+CommandQueue queue(10);
+
+boolean _speedCtl1;
+boolean _speedCtl2;
 
 boolean _p1state = THROUGH;
 boolean _p2state = THROUGH;
@@ -83,15 +90,24 @@ byte _LEDstate;
 void receiveEvent(int howMany) {
   char c;
   
-  while(0 < Wire.available()) { // loop through all characters
-    c = Wire.read();            // receive byte as a character
-    strCommandBuffer += c;      // append character
-    Serial.print(c);            // print the character
+  while(Wire.available() > 0) {         // loop through all characters
+    c = Wire.read();                    // receive byte as a character
+    if (c == '\n') {                    // if newline received, add to queue
+      if (strI2CCommand.length() > 0) { // Add to queue if length is > 0
+        queue.push(strI2CCommand);
+        strI2CCommand = "";
+      }
+    } else {
+      strI2CCommand += c;               // append character
+    }
+    Serial.print(c);                    // print the character
   }
-  Serial.println('\n');         // print new line
-
-  // if last character is not a newline, append a new line
-  if (c != '\n') strCommandBuffer += '\n';  
+  Serial.println('\n');                 // print new line
+  
+  if (strI2CCommand.length() > 0) {     // Add to queue if length is > 0
+    queue.push(strI2CCommand);
+    strI2CCommand = "";                 // Reset to blank
+  }
 }
 
 
@@ -128,78 +144,99 @@ void setup() {
   UpdateLEDs();
   delay(1000); // 1 sec
 
+  // Start communications
   Serial.begin(9600);
-  Wire.begin(2);
-  Wire.onReceive(receiveEvent); // register event
+  Wire.begin(I2Caddress);                                     // Address
+  bitSet(TWAR, TWGCE);                                        // Enable I2C General Call receive (broadcast) in TWI Addr Register
+  Wire.onReceive(receiveEvent);                               // Register event handler for I2C
 }
 
 
 void loop() {
   // Save current millis
   lngCurrentMillis = millis();
+
+  /**********************************************************************************
+  /* Step 1: Process incoming commands on Serial and I2C
+  /**********************************************************************************/
+  // I2C is handled using event handler receiveEvent(int)
   
   if (Serial.available() > 0) {
-    strCommandBuffer += Serial.readString();
-       
-    Serial.println(strCommandBuffer);
+    strSerialCommand += Serial.readString();
+
+    if (strSerialCommand.charAt(strSerialCommand.length()-1) == '\n') {                       // If last character is newline
+      strSerialCommand = strSerialCommand.substring(0, strSerialCommand.indexOf('\n'));       // Exclude the found newline
+    }
+    
+    queue.push(strSerialCommand);                             // Push the command into the queue
+    Serial.println(strSerialCommand);
+    strSerialCommand = "";
   }
 
+  /**********************************************************************************
+  /* Step 2: Process I/O
+  /**********************************************************************************/
   // Read all the digital pins, check for debounce before appending command
   _btn1.Update();
   _btn2.Update();
 
   // Action based on state change
-  if (_btn1.JustChanged() && _btn1.Status() == LOW) {
+  if (_btn1.JustChanged() && _btn1.Status() == LOW) {         // Push corresponding command into the queue
     if (_p1state==DIVERT) {
-      strCommandBuffer += "p1t\n";
+      queue.push("p1t");
     } else { // is THROUGH
-      strCommandBuffer += "p1d\n";
+      queue.push("p1d");
     }
   } 
-  if (_btn2.JustChanged() && _btn2.Status() == LOW) {
+  if (_btn2.JustChanged() && _btn2.Status() == LOW) {         // Push corresponding command into the queue
     if (_p2state==DIVERT) {
-      strCommandBuffer += "p2t\n";
+      queue.push("p2t");
     } else { // is THROUGH
-      strCommandBuffer += "p2d\n";
+      queue.push("p2d");
     }
   }
 
   Serial.print(_btn1.Status());
   Serial.print(",");
-  Serial.print(_btn1.JustChanged());
+  Serial.print(_btn1.JustChanged()); 
   Serial.print(",");
   Serial.print(_btn2.Status());
   Serial.print(",");
   Serial.println(_btn2.JustChanged());
 
-
-  // Ensure that the buffer is terminated with \n
-  if (strCommandBuffer.length() > 0 && strCommandBuffer.charAt(strCommandBuffer.length()-1) != '\n') {
-    strCommandBuffer += '\n';
-  }
-
+  
+  /**********************************************************************************
+  /* Step 3: Consume Command Queue
+  /**********************************************************************************/
 
   // If there is a new command
-  if (strCommandBuffer.length() > 0) {
-    // Get the first command delimited by '\n'
-    strCommand = strCommandBuffer.substring(0, strCommandBuffer.indexOf('\n'));       // Exclude the found newline
-    strCommandBuffer = strCommandBuffer.substring(strCommandBuffer.indexOf('\n')+1);  // Skip the newline
+  if (queue.size() > 0) {
+    // Get the first command
+    strCommand = queue.pop();
+  } else {
+    strCommand = "";
   }
 
 
   // Process the commands
   if (strCommand.length() > 0) {
     // Process speed broadcasts
-    if (strCommand=="s1on")   bP12interlocked = true;
-    if (strCommand=="s1off")  bP12interlocked = false;
-    if (strCommand=="s2on")   bP12interlocked = true;
-    if (strCommand=="s2off")  bP12interlocked = false;
+    if (strCommand=="s1on")   _speedCtl1 = true;
+    if (strCommand=="s1off")  _speedCtl1 = false;
+    if (strCommand=="s2on")   _speedCtl2 = true;
+    if (strCommand=="s2off")  _speedCtl2 = false;
+
+    // Interlocked if both speed controls are on
+    bP12interlocked = _speedCtl1 && _speedCtl2;   
 
     // If interlocked, discard the incoming command
     if (bP12interlocked) {
-      if (strCommand.charAt(0) == 'p') strCommand = "";
+      if (strCommand.charAt(0)=='p' && (strCommand.charAt(1)=='1' || strCommand.charAt(1)=='2')) {
+        strCommand = "";
+        // Todo: flash lights
+      }
 
-      P1command(THROUGH);
+      P1command(THROUGH);                 // Command both points to through anyway
       P2command(THROUGH);
 
     } else {
@@ -217,26 +254,46 @@ void loop() {
       }
 
     }
+  }
+
+  
+  /**********************************************************************************
+  /* Step 4: Update LEDs
+  /**********************************************************************************/
+  
+  UpdateLEDs();
+
+  
+  /**********************************************************************************
+  /* Step 5: Update Serial, LED, I2C
+  /**********************************************************************************/
+
+  // Serial write, update onboard LED
+  if (strCommand.length() > 0) {
 
     Serial.println(strCommand.length());
     Serial.println(strCommand);
-    Serial.println(strCommandBuffer.length());
-    Serial.println(strCommandBuffer);
+    Serial.println(queue.size());
 
     // Turn on the LED to indicate that command received
     lngLEDOnMillis = millis();
     digitalWrite(LED_BUILTIN, HIGH);
-    bLEDOn = true;    
-
-    UpdateLEDs();
+    bLEDOn = true;
   }
 
 
-  // Broadcast
+  // Broadcast on I2C
   if (strCommand.length() > 0) {
-    Wire.beginTransmission(1);        // Transmit to device number 1 (0x2C)
-    Wire.write(strCommand.c_str());   // Send the C string array
-    Wire.endTransmission();
+
+    if (strCommand.substring(0,2)=='p1' || strCommand.substring(0,2)=='p2') {
+
+      strCommand = String("_") + strCommand;
+    
+      Wire.beginTransmission(11);         // Transmit to device number 11
+      Wire.write(strCommand.c_str());     // Send the C string array
+      Wire.endTransmission();
+      
+    }
 
     // Must reset it here
     strCommand = "";
@@ -250,8 +307,13 @@ void loop() {
     bLEDOn = false;
   }
 
+  
+  /**********************************************************************************
+  /* Step 6: Loop
+  /**********************************************************************************/
+
   // Prevent main loop from running too fast if no more commands to process
-  if (strCommandBuffer.length() == 0) {
+  if (queue.size() == 0) {
     delay(_looptime);
   }
   
@@ -353,9 +415,9 @@ void UpdateLEDs() {
   // Shift out MSB first as outputs are 0-5
   shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, _LEDstate);
 
-  digitalWrite(_shiftCLOCK, LOW);  
-  digitalWrite(_shiftLATCH, HIGH);
-  delay(10);
+  digitalWrite(_shiftCLOCK, LOW);
+  
+  digitalWrite(_shiftLATCH, HIGH);  // Pulse the latch
   digitalWrite(_shiftLATCH, LOW);  
 
 }
