@@ -5,9 +5,16 @@
 #define THROUGH 0
 #define DIVERT 1
 
+#define RED 1
+#define GREEN 0
+
 // Pin A4 reserved for SDA
 // Pin A5 reserved for SCL
 
+// Command format:
+// xxx = status update
+// !xxx = command
+// ?xxx = query
 
 
 
@@ -29,13 +36,15 @@ Button _btn2(_pin_btn2, _debounce);
 
 /* I2C Command Processing *******************************/
 
-#define I2Caddress 12
+#define I2C_SpeedController 11
+#define I2C_PointsController 12
 
 // For incoming data processing
 String strSerialCommand;      // for current command data
 String strI2CCommand;         // for all incoming command data
 
 String strCommand;            // Current command for processing
+String strResponse;           // Response to command
 
 
 /* State Processing *************************************/
@@ -58,8 +67,16 @@ boolean bP12interlocked = false;
 boolean bLEDOn = false;
 unsigned long lngLEDOnMillis = 0;
 
+
+
 // 8 bit LED register to indicate turnout direction
-byte _LEDstate; 
+byte _LEDstate[3];
+// 0 for local lights (0-7)
+// 1,2 for remote lights (8-15, 16-23)
+
+#define setLight(LightID)     bitSet  (_LEDstate[(LightID)/8], ((LightID)%8) ) 
+#define clearLight(LightID)   bitClear(_LEDstate[(LightID)/8], ((LightID)%8) ) 
+
 
 
 /* Output Processing ************************************/
@@ -100,14 +117,63 @@ void receiveEvent(int howMany) {
     } else {
       strI2CCommand += c;               // append character
     }
-    Serial.print(c);                    // print the character
+    //Serial.print(c);                    // print the character
   }
-  Serial.println('\n');                 // print new line
+  //Serial.println('\n');                 // print new line
   
   if (strI2CCommand.length() > 0) {     // Add to queue if length is > 0
     queue.push(strI2CCommand);
     strI2CCommand = "";                 // Reset to blank
   }
+}
+
+void processSerialInput() {
+  // Run if Serial is available
+  if (Serial.available() > 0) {
+    strSerialCommand += Serial.readString();
+
+    if (strSerialCommand.charAt(strSerialCommand.length()-1) == '\n') {                       // If last character is newline
+      strSerialCommand = strSerialCommand.substring(0, strSerialCommand.indexOf('\n'));       // Exclude the found newline
+    }
+    
+    queue.push(strSerialCommand);                             // Push the command into the queue
+    Serial.println(strSerialCommand);
+    strSerialCommand = "";
+  }  
+}
+
+void processIOInput() {
+  // Process on-board inputs 
+  
+  // Read all the digital pins, check for debounce before appending command
+  _btn1.Update();
+  _btn2.Update();
+
+  // Action based on state change
+  if (_btn1.JustChanged() && _btn1.Status() == LOW) {         // Push corresponding command into the queue
+    if (_p1state==DIVERT) {
+      queue.push("p1t");
+    } else { // is THROUGH
+      queue.push("p1d");
+    }
+  } 
+  if (_btn2.JustChanged() && _btn2.Status() == LOW) {         // Push corresponding command into the queue
+    if (_p2state==DIVERT) {
+      queue.push("p2t");
+    } else { // is THROUGH
+      queue.push("p2d");
+    }
+  }
+
+/*
+  Serial.print(_btn1.Status());
+  Serial.print(",");
+  Serial.print(_btn1.JustChanged()); 
+  Serial.print(",");
+  Serial.print(_btn2.Status());
+  Serial.print(",");
+  Serial.println(_btn2.JustChanged());
+*/
 }
 
 
@@ -146,10 +212,12 @@ void setup() {
 
   // Start communications
   Serial.begin(9600);
-  Wire.begin(I2Caddress);                                     // Address
+  Wire.begin(I2C_PointsController);                           // Address
   bitSet(TWAR, TWGCE);                                        // Enable I2C General Call receive (broadcast) in TWI Addr Register
   Wire.onReceive(receiveEvent);                               // Register event handler for I2C
 }
+
+
 
 
 void loop() {
@@ -160,50 +228,16 @@ void loop() {
   /* Step 1: Process incoming commands on Serial and I2C
   /**********************************************************************************/
   // I2C is handled using event handler receiveEvent(int)
-  
-  if (Serial.available() > 0) {
-    strSerialCommand += Serial.readString();
 
-    if (strSerialCommand.charAt(strSerialCommand.length()-1) == '\n') {                       // If last character is newline
-      strSerialCommand = strSerialCommand.substring(0, strSerialCommand.indexOf('\n'));       // Exclude the found newline
-    }
-    
-    queue.push(strSerialCommand);                             // Push the command into the queue
-    Serial.println(strSerialCommand);
-    strSerialCommand = "";
-  }
+  // Serial is handled using void processSerialInput()
+  processSerialInput();
+  
 
   /**********************************************************************************
   /* Step 2: Process I/O
   /**********************************************************************************/
-  // Read all the digital pins, check for debounce before appending command
-  _btn1.Update();
-  _btn2.Update();
-
-  // Action based on state change
-  if (_btn1.JustChanged() && _btn1.Status() == LOW) {         // Push corresponding command into the queue
-    if (_p1state==DIVERT) {
-      queue.push("p1t");
-    } else { // is THROUGH
-      queue.push("p1d");
-    }
-  } 
-  if (_btn2.JustChanged() && _btn2.Status() == LOW) {         // Push corresponding command into the queue
-    if (_p2state==DIVERT) {
-      queue.push("p2t");
-    } else { // is THROUGH
-      queue.push("p2d");
-    }
-  }
-
-  Serial.print(_btn1.Status());
-  Serial.print(",");
-  Serial.print(_btn1.JustChanged()); 
-  Serial.print(",");
-  Serial.print(_btn2.Status());
-  Serial.print(",");
-  Serial.println(_btn2.JustChanged());
-
+  // Process on-board IO inputs
+  processIOInput();
   
   /**********************************************************************************
   /* Step 3: Consume Command Queue
@@ -280,32 +314,17 @@ void loop() {
     digitalWrite(LED_BUILTIN, HIGH);
     bLEDOn = true;
   }
-
-
-  // Broadcast on I2C
-  if (strCommand.length() > 0) {
-
-    if (strCommand.substring(0,2)=='p1' || strCommand.substring(0,2)=='p2') {
-
-      strCommand = String("_") + strCommand;
-    
-      Wire.beginTransmission(11);         // Transmit to device number 11
-      Wire.write(strCommand.c_str());     // Send the C string array
-      Wire.endTransmission();
-      
-    }
-
-    // Must reset it here
-    strCommand = "";
-  }
   
-
   // Turn off the LED after a 1 second delay
   if (bLEDOn && millis() > lngLEDOnMillis + 1000) {
     lngLEDOnMillis = 0;
     digitalWrite(LED_BUILTIN, LOW);
     bLEDOn = false;
   }
+
+  UpdateI2C();
+
+
 
   
   /**********************************************************************************
@@ -320,10 +339,48 @@ void loop() {
 }
 
 
+void UpdateI2C() {
+
+  // Broadcast on I2C
+  if (strCommand.length() > 0) {
+
+    // Broadcast current state
+    if (strCommand.substring(0,2)=="p1" || strCommand.substring(0,2)=="p2") {
+   
+      Wire.beginTransmission(I2C_SpeedController);          // Transmit to SpeedController device
+      Wire.write(strCommand.c_str());                       // Send the C string array
+      Wire.endTransmission();
+      Serial.println(strResponse);
+      
+    }
+
+    if (strCommand.substring(0,1)=="?") {
+      strResponse = "";
+      
+      if (strCommand.substring(0,3)=="?p1") strResponse = (_p1state == THROUGH)?"p1t":"p1d";
+      if (strCommand.substring(0,3)=="?p2") strResponse = (_p2state == THROUGH)?"p2t":"p2d";
+
+      if (strResponse.length() > 0) {
+        Wire.beginTransmission(I2C_SpeedController);          // Transmit to SpeedController device
+        Wire.write(strCommand.c_str());                       // Send the C string array
+        Wire.endTransmission();
+        Serial.println(strResponse);
+      }
+    }
+    
+
+    // Must reset it here
+    strCommand = "";
+  }
+  
+}
+
+
 
 // OUTPUTS: Handle the command processing
 
 void P1command(boolean command) {
+  // Left side 
   if (command==DIVERT) {
       // Pulse the DIVERT pins
       digitalWrite(_pin_p1a_d, HIGH);
@@ -338,9 +395,9 @@ void P1command(boolean command) {
       delay(_pulsetime);
       _p1state = DIVERT;
 
-      bitClear(_LEDstate, 0);
-      bitSet(_LEDstate, 1);
-      bitClear(_LEDstate, 2);
+      clearLight(3);
+      setLight(4);
+      clearLight(5);
       
   } else if (command==THROUGH) {    
       // Pulse the THROUGH pins
@@ -356,15 +413,16 @@ void P1command(boolean command) {
       delay(_pulsetime);
       _p1state = THROUGH;
 
-      bitSet(_LEDstate, 0);
-      bitClear(_LEDstate, 1);
-      bitSet(_LEDstate, 2);
+      setLight(3);
+      clearLight(4);
+      setLight(5);
       
   }
   
   UpdateLEDs();
 }
 void P2command(boolean command) {
+  // Right side
   if (command==DIVERT) {
       // Pulse the DIVERT pins
       digitalWrite(_pin_p2a_d, HIGH);
@@ -379,9 +437,9 @@ void P2command(boolean command) {
       delay(_pulsetime);
       _p2state = DIVERT;
 
-      bitClear(_LEDstate, 3);
-      bitSet(_LEDstate, 4);
-      bitClear(_LEDstate, 5);
+      clearLight(0);
+      setLight(1);
+      clearLight(2);
       
   } else if (command==THROUGH) {     
       // Pulse the THROUGH pins
@@ -397,14 +455,66 @@ void P2command(boolean command) {
       delay(_pulsetime);
       _p2state = THROUGH;
       
-      bitSet(_LEDstate, 3);
-      bitClear(_LEDstate, 4);
-      bitSet(_LEDstate, 5);
+      setLight(0);
+      clearLight(1);
+      setLight(2);
       
   }
   
   UpdateLEDs();
 }
+
+void UpdateSignals() {
+
+  // Assume THROUGH first
+  if (_p1state==THROUGH) {
+    UpdateSignalID(1, GREEN);
+    UpdateSignalID(2, RED);
+    UpdateSignalID(3, GREEN);    
+  }
+  
+  if (_p2state==THROUGH) {
+    UpdateSignalID(4, GREEN);
+    UpdateSignalID(5, RED);
+    UpdateSignalID(6, GREEN);
+  }
+
+  // Modify lights 4/3 if DIVERT is present for _p1 and _p2
+  if (_p1state==DIVERT) {
+    UpdateSignalID(1, RED);
+    UpdateSignalID(2, GREEN);
+    UpdateSignalID(3, RED);
+        
+    UpdateSignalID(4, RED);
+  }
+  if (_p2state==DIVERT) {
+    UpdateSignalID(4, RED);
+    UpdateSignalID(5, GREEN);
+    UpdateSignalID(6, RED);
+        
+    UpdateSignalID(3, RED);
+  }
+  
+  
+  
+}
+
+void UpdateSignalID(int SignalID, int RedOrGreen) {
+  // Translate SignalID to LED ID
+  // LED ID = 8 + (SignalID-1) * 2 + RedOrGreen
+  // if SignalID = 5
+  // Red LED =   8 + (5-1)*2 + 1 = 17
+  // Green LED = 8 + (5-1)*2 + 0 = 16
+
+  if (RedOrGreen == RED) {
+    setLight  (8 + (SignalID-1) * 2 + 1);
+    clearLight(8 + (SignalID-1) * 2);
+  } else {
+    clearLight(8 + (SignalID-1) * 2 + 1);
+    setLight  (8 + (SignalID-1) * 2);
+  }  
+}
+
 
 // Update LEDs via shift register
 void UpdateLEDs() {
@@ -412,8 +522,14 @@ void UpdateLEDs() {
   digitalWrite(_shiftCLOCK, LOW); 
   digitalWrite(_shiftLATCH, LOW);
 
-  // Shift out MSB first as outputs are 0-5
-  shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, _LEDstate);
+  UpdateSignals();
+
+  // Shift out remote lights first (invert as common cathode)
+  shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, ~(_LEDstate[2]));
+  shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, ~(_LEDstate[1]));
+  
+  // Shift out MSB (7) first as outputs are 0-5
+  shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, _LEDstate[0]);
 
   digitalWrite(_shiftCLOCK, LOW);
   
