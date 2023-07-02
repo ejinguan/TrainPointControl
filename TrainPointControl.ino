@@ -74,8 +74,12 @@ byte _LEDstate[3];
 // 0 for local lights (0-7)
 // 1,2 for remote lights (8-15, 16-23)
 
-#define setLight(LightID)     bitSet  (_LEDstate[(LightID)/8], ((LightID)%8) ) 
-#define clearLight(LightID)   bitClear(_LEDstate[(LightID)/8], ((LightID)%8) ) 
+// Shift register ID of first signal light
+#define FIRSTSIGNALID 8
+// Integer divide Light ID by 8 to get corresponding byte
+// Modulo of LightID with 8 to get bit number in the byte
+#define setLight(LightID)     bitSet  (_LEDstate[(LightID+FIRSTSIGNALID-8)/8], ((LightID)%8) ) 
+#define clearLight(LightID)   bitClear(_LEDstate[(LightID+FIRSTSIGNALID-8)/8], ((LightID)%8) ) 
 
 
 
@@ -178,6 +182,10 @@ void processIOInput() {
 
 
 void setup() {
+  // Start communications
+  Serial.begin(9600);
+  Serial.println("Setting Inputs");
+  
   pinMode(LED_BUILTIN, OUTPUT);
   
   // Set all point motor pins to OUTPUT
@@ -200,6 +208,8 @@ void setup() {
   pinMode(_pin_btn2, INPUT_PULLUP);
   // Initialized in Button class
 
+  Serial.println("Resetting Points");
+  
   // Reset points to THROUGH
   P1command(DIVERT);
   P2command(DIVERT);
@@ -210,11 +220,12 @@ void setup() {
   UpdateLEDs();
   delay(1000); // 1 sec
 
-  // Start communications
-  Serial.begin(9600);
+  // Start I2C
   Wire.begin(I2C_PointsController);                           // Address
   bitSet(TWAR, TWGCE);                                        // Enable I2C General Call receive (broadcast) in TWI Addr Register
   Wire.onReceive(receiveEvent);                               // Register event handler for I2C
+
+  Serial.println("I2C started");
 }
 
 
@@ -261,7 +272,7 @@ void loop() {
     if (strCommand=="s2off")  _speedCtl2 = false;
 
     // Interlocked if both speed controls are on
-    bP12interlocked = _speedCtl1 && _speedCtl2;   
+    bP12interlocked = _speedCtl1 && _speedCtl2;
 
     // If interlocked, discard the incoming command
     if (bP12interlocked) {
@@ -274,6 +285,8 @@ void loop() {
       P2command(THROUGH);
 
     } else {
+      // Not interlocked, free to move
+      
       // Process point movement
       if (strCommand=="p1t") {
         P1command(THROUGH);
@@ -305,9 +318,8 @@ void loop() {
   // Serial write, update onboard LED
   if (strCommand.length() > 0) {
 
-    Serial.println(strCommand.length());
-    Serial.println(strCommand);
-    Serial.println(queue.size());
+    Serial.println("Cmd (len): " + strCommand + " (" + strCommand.length() + ")");
+    Serial.println("Q len: " + queue.size());
 
     // Turn on the LED to indicate that command received
     lngLEDOnMillis = millis();
@@ -501,18 +513,19 @@ void UpdateSignals() {
 
 void UpdateSignalID(int SignalID, int RedOrGreen) {
   // Translate SignalID to LED ID
-  // LED ID = 8 + (SignalID-1) * 2 + RedOrGreen
+  // LED ID = FIRSTSIGNALID + (SignalID-1) * 2 + RedOrGreen
+  // FIRSTSIGNALID is the shift register index for the first signal light
   // if SignalID = 5
-  // Red LED =   8 + (5-1)*2 + 1 = 17
-  // Green LED = 8 + (5-1)*2 + 0 = 16
+  // Red LED =   FIRSTSIGNALID + (5-1)*2 + 1 = 17
+  // Green LED = FIRSTSIGNALID + (5-1)*2 + 0 = 16
 
   if (RedOrGreen == RED) {
-    setLight  (8 + (SignalID-1) * 2 + 1);
-    clearLight(8 + (SignalID-1) * 2);
+    setLight  (FIRSTSIGNALID + (SignalID-1) * 2 + 1);
+    clearLight(FIRSTSIGNALID + (SignalID-1) * 2);
   } else {
-    clearLight(8 + (SignalID-1) * 2 + 1);
-    setLight  (8 + (SignalID-1) * 2);
-  }  
+    clearLight(FIRSTSIGNALID + (SignalID-1) * 2 + 1);
+    setLight  (FIRSTSIGNALID + (SignalID-1) * 2);
+  }
 }
 
 
