@@ -153,15 +153,24 @@ void processIOInput() {
   _btn1.Update();
   _btn2.Update();
 
+  //Serial.println(digitalRead(_pin_btn1));
+  //Serial.println(digitalRead(_pin_btn2));
+
+  //_btn1.Debug();
+  //_btn2.Debug();
+  
+  //Serial.println(_btn1.IsPressed());
+  //Serial.println(_btn2.IsPressed());
+
   // Action based on state change
-  if (_btn1.JustChanged() && _btn1.Status() == LOW) {         // Push corresponding command into the queue
+  if (_btn1.JustChanged() && _btn1.IsPressed()) {         // Push corresponding command into the queue
     if (_p1state==DIVERT) {
       queue.push("p1t");
     } else { // is THROUGH
       queue.push("p1d");
     }
   } 
-  if (_btn2.JustChanged() && _btn2.Status() == LOW) {         // Push corresponding command into the queue
+  if (_btn2.JustChanged() && _btn2.IsPressed()) {         // Push corresponding command into the queue
     if (_p2state==DIVERT) {
       queue.push("p2t");
     } else { // is THROUGH
@@ -207,6 +216,9 @@ void setup() {
   pinMode(_pin_btn1, INPUT_PULLUP);
   pinMode(_pin_btn2, INPUT_PULLUP);
   // Initialized in Button class
+
+  _btn1.setPin(_pin_btn1);
+  _btn2.setPin(_pin_btn2);
 
   Serial.println("Resetting Points");
   
@@ -504,7 +516,7 @@ void UpdateSignals() {
     UpdateSignalID(5, GREEN);
     UpdateSignalID(6, RED);
         
-    UpdateSignalID(3, RED);
+    UpdateSignalID(1, RED);
   }
   
   
