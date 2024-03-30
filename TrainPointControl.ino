@@ -87,20 +87,20 @@ byte _LEDstate[3];
 
 // Define outputs for actuating the point motors
 // Pair of through and divert
-#define _pin_p1a_t 12
-#define _pin_p1a_d 11
-#define _pin_p1b_t 10
-#define _pin_p1b_d 9
-#define _pin_p2a_t 8
-#define _pin_p2a_d 7
-#define _pin_p2b_t 6
-#define _pin_p2b_d 5
+#define _pin_p1a_t 11
+#define _pin_p1a_d 10
+#define _pin_p1b_t 9
+#define _pin_p1b_d 8
+#define _pin_p2a_t 7
+#define _pin_p2a_d 6
+#define _pin_p2b_t 5
+#define _pin_p2b_d 4
 
 #define _pulsetime 50 /*ms*/
 
-#define _shiftDATA 2
-#define _shiftCLOCK 3
-#define _shiftLATCH 4
+#define _shiftDATA 3
+#define _shiftCLOCK 12
+#define _shiftLATCH 13
 
 
 
@@ -213,12 +213,9 @@ void setup() {
   pinMode(_shiftLATCH, OUTPUT);
 
   // Set all button inputs to INPUT PULLUP
-  pinMode(_pin_btn1, INPUT_PULLUP);
-  pinMode(_pin_btn2, INPUT_PULLUP);
+  //pinMode(_pin_btn1, INPUT_PULLUP);
+  //pinMode(_pin_btn2, INPUT_PULLUP);
   // Initialized in Button class
-
-  _btn1.setPin(_pin_btn1);
-  _btn2.setPin(_pin_btn2);
 
   Serial.println("Resetting Points");
   
