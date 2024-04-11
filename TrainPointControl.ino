@@ -405,13 +405,15 @@ void P1command(boolean command) {
   if (command==DIVERT) {
       // Pulse the DIVERT pins
       digitalWrite(_pin_p1a_d, HIGH);
-      digitalWrite(_pin_p1b_d, HIGH);
       digitalWrite(_pin_p1a_t, LOW);
-      digitalWrite(_pin_p1b_t, LOW);
       delay(_pulsetime);
       digitalWrite(_pin_p1a_d, LOW);
-      digitalWrite(_pin_p1b_d, LOW);
       digitalWrite(_pin_p1a_t, LOW);
+      delay(_pulsetime);
+      digitalWrite(_pin_p1b_d, HIGH);
+      digitalWrite(_pin_p1b_t, LOW);
+      delay(_pulsetime);
+      digitalWrite(_pin_p1b_d, LOW);
       digitalWrite(_pin_p1b_t, LOW);
       delay(_pulsetime);
       _p1state = DIVERT;
@@ -423,13 +425,15 @@ void P1command(boolean command) {
   } else if (command==THROUGH) {    
       // Pulse the THROUGH pins
       digitalWrite(_pin_p1a_t, HIGH);
-      digitalWrite(_pin_p1b_t, HIGH);
       digitalWrite(_pin_p1a_d, LOW);
-      digitalWrite(_pin_p1b_d, LOW);
       delay(_pulsetime);
       digitalWrite(_pin_p1a_t, LOW);
-      digitalWrite(_pin_p1b_t, LOW);
       digitalWrite(_pin_p1a_d, LOW);
+      delay(_pulsetime);
+      digitalWrite(_pin_p1b_t, HIGH);
+      digitalWrite(_pin_p1b_d, LOW);
+      delay(_pulsetime);
+      digitalWrite(_pin_p1b_t, LOW);
       digitalWrite(_pin_p1b_d, LOW);
       delay(_pulsetime);
       _p1state = THROUGH;
@@ -447,13 +451,15 @@ void P2command(boolean command) {
   if (command==DIVERT) {
       // Pulse the DIVERT pins
       digitalWrite(_pin_p2a_d, HIGH);
-      digitalWrite(_pin_p2b_d, HIGH);
       digitalWrite(_pin_p2a_t, LOW);
-      digitalWrite(_pin_p2b_t, LOW);
       delay(_pulsetime);
       digitalWrite(_pin_p2a_d, LOW);
-      digitalWrite(_pin_p2b_d, LOW);
       digitalWrite(_pin_p2a_t, LOW);
+      delay(_pulsetime);
+      digitalWrite(_pin_p2b_d, HIGH);
+      digitalWrite(_pin_p2b_t, LOW);
+      delay(_pulsetime);
+      digitalWrite(_pin_p2b_d, LOW);
       digitalWrite(_pin_p2b_t, LOW);
       delay(_pulsetime);
       _p2state = DIVERT;
@@ -465,13 +471,15 @@ void P2command(boolean command) {
   } else if (command==THROUGH) {     
       // Pulse the THROUGH pins
       digitalWrite(_pin_p2a_t, HIGH);
-      digitalWrite(_pin_p2b_t, HIGH);
       digitalWrite(_pin_p2a_d, LOW);
-      digitalWrite(_pin_p2b_d, LOW);
       delay(_pulsetime);
       digitalWrite(_pin_p2a_t, LOW);
-      digitalWrite(_pin_p2b_t, LOW);
       digitalWrite(_pin_p2a_d, LOW);
+      delay(_pulsetime);
+      digitalWrite(_pin_p2b_t, HIGH);
+      digitalWrite(_pin_p2b_d, LOW);
+      delay(_pulsetime);
+      digitalWrite(_pin_p2b_t, LOW);
       digitalWrite(_pin_p2b_d, LOW);
       delay(_pulsetime);
       _p2state = THROUGH;
