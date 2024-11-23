@@ -12,38 +12,26 @@
 // Pin A5 reserved for SCL
 
 // Command format:
-// xxx = status update
-// !xxx = command
+// xxx = command
+// _xxx = status update
 // ?xxx = query
 
-
-
-/* Button Processing ************************************/
-
-#define _debounce 200 /*ms*/
 unsigned long lngCurrentMillis = 0;
 
-// Define button inputs (using Analog Inputs) 
-#define _pin_btn1 14 /*A0*/
-#define _pin_btn2 15 /*A1*/
-//#define _pin_btn3 16 /*A2*/
-//#define _pin_btn4 17 /*A3*/
-
-// Define and initialize Button objects
-Button _btn1(_pin_btn1, _debounce);
-Button _btn2(_pin_btn2, _debounce);
 
 
 /* I2C Command Processing *******************************/
 
+#define I2C_Broadcast 0
 #define I2C_SpeedController 11
-#define I2C_PointsController 12
+#define I2C_RemotePointsController 12
+#define I2C_LocalPointsController 13
 
 // For incoming data processing
-String strSerialCommand;      // for current command data
-String strI2CCommand;         // for all incoming command data
+String strSerialCommand;      // for Incoming Serial command data
+String strI2CCommand;         // for Incoming I2C command data
 
-String strCommand;            // Current command for processing
+String strCommand;            // Current command for processing retrieved from queue
 String strResponse;           // Response to command
 
 
@@ -69,18 +57,19 @@ unsigned long lngLEDOnMillis = 0;
 
 
 
-// 8 bit LED register to indicate turnout direction
-byte _LEDstate[3];
-// 0 for local lights (0-7)
-// 1,2 for remote lights (8-15, 16-23)
+// 8 bit LED register to indicate LED status
+byte _LEDstate[2];
+// 0,1 for lights (0-7, 8-11)
 
 // Shift register ID of first signal light
-#define FIRSTSIGNALID 8
+#define FIRSTSIGNALID 0
 // Integer divide Light ID by 8 to get corresponding byte
 // Modulo of LightID with 8 to get bit number in the byte
-#define setLight(LightID)     bitSet  (_LEDstate[(LightID+FIRSTSIGNALID-8)/8], ((LightID)%8) ) 
-#define clearLight(LightID)   bitClear(_LEDstate[(LightID+FIRSTSIGNALID-8)/8], ((LightID)%8) ) 
+#define setLight(LightID)     bitSet  (_LEDstate[(LightID+FIRSTSIGNALID)/8], ((LightID)%8) ) 
+#define clearLight(LightID)   bitClear(_LEDstate[(LightID+FIRSTSIGNALID)/8], ((LightID)%8) ) 
 
+int _LED_brightness = 1;        // out of 10
+int _LED_brightness_counter = 0;
 
 
 /* Output Processing ************************************/
@@ -98,9 +87,9 @@ byte _LEDstate[3];
 
 #define _pulsetime 50 /*ms*/
 
-#define _shiftDATA 3
-#define _shiftCLOCK 12
-#define _shiftLATCH 13
+#define _shiftDATA 2
+#define _shiftCLOCK 3
+#define _shiftLATCH 12
 
 
 
@@ -110,8 +99,9 @@ byte _LEDstate[3];
 // this function is registered as an event, see setup()
 void receiveEvent(int howMany) {
   char c;
-  
-  while(Wire.available() > 0) {         // loop through all characters
+  int i;
+
+  for(i=0;i<howMany;i++) {              // loop through all characters
     c = Wire.read();                    // receive byte as a character
     if (c == '\n') {                    // if newline received, add to queue
       if (strI2CCommand.length() > 0) { // Add to queue if length is > 0
@@ -121,9 +111,7 @@ void receiveEvent(int howMany) {
     } else {
       strI2CCommand += c;               // append character
     }
-    //Serial.print(c);                    // print the character
   }
-  //Serial.println('\n');                 // print new line
   
   if (strI2CCommand.length() > 0) {     // Add to queue if length is > 0
     queue.push(strI2CCommand);
@@ -145,50 +133,6 @@ void processSerialInput() {
     strSerialCommand = "";
   }  
 }
-
-void processIOInput() {
-  // Process on-board inputs 
-  
-  // Read all the digital pins, check for debounce before appending command
-  _btn1.Update();
-  _btn2.Update();
-
-  //Serial.println(digitalRead(_pin_btn1));
-  //Serial.println(digitalRead(_pin_btn2));
-
-  //_btn1.Debug();
-  //_btn2.Debug();
-  
-  //Serial.println(_btn1.IsPressed());
-  //Serial.println(_btn2.IsPressed());
-
-  // Action based on state change
-  if (_btn1.JustChanged() && _btn1.IsPressed()) {         // Push corresponding command into the queue
-    if (_p1state==DIVERT) {
-      queue.push("p1t");
-    } else { // is THROUGH
-      queue.push("p1d");
-    }
-  } 
-  if (_btn2.JustChanged() && _btn2.IsPressed()) {         // Push corresponding command into the queue
-    if (_p2state==DIVERT) {
-      queue.push("p2t");
-    } else { // is THROUGH
-      queue.push("p2d");
-    }
-  }
-
-/*
-  Serial.print(_btn1.Status());
-  Serial.print(",");
-  Serial.print(_btn1.JustChanged()); 
-  Serial.print(",");
-  Serial.print(_btn2.Status());
-  Serial.print(",");
-  Serial.println(_btn2.JustChanged());
-*/
-}
-
 
 void setup() {
   // Start communications
@@ -212,11 +156,6 @@ void setup() {
   pinMode(_shiftCLOCK, OUTPUT);
   pinMode(_shiftLATCH, OUTPUT);
 
-  // Set all button inputs to INPUT PULLUP
-  //pinMode(_pin_btn1, INPUT_PULLUP);
-  //pinMode(_pin_btn2, INPUT_PULLUP);
-  // Initialized in Button class
-
   Serial.println("Resetting Points");
   
   // Reset points to THROUGH
@@ -230,7 +169,7 @@ void setup() {
   delay(1000); // 1 sec
 
   // Start I2C
-  Wire.begin(I2C_PointsController);                           // Address
+  Wire.begin(I2C_RemotePointsController);                     // Address
   bitSet(TWAR, TWGCE);                                        // Enable I2C General Call receive (broadcast) in TWI Addr Register
   Wire.onReceive(receiveEvent);                               // Register event handler for I2C
 
@@ -257,7 +196,7 @@ void loop() {
   /* Step 2: Process I/O
   /**********************************************************************************/
   // Process on-board IO inputs
-  processIOInput();
+  //processIOInput();
   
   /**********************************************************************************
   /* Step 3: Consume Command Queue
@@ -267,6 +206,7 @@ void loop() {
   if (queue.size() > 0) {
     // Get the first command
     strCommand = queue.pop();
+    Serial.println("Current command: " + strCommand);
   } else {
     strCommand = "";
   }
@@ -275,10 +215,10 @@ void loop() {
   // Process the commands
   if (strCommand.length() > 0) {
     // Process speed broadcasts
-    if (strCommand=="s1on")   _speedCtl1 = true;
-    if (strCommand=="s1off")  _speedCtl1 = false;
-    if (strCommand=="s2on")   _speedCtl2 = true;
-    if (strCommand=="s2off")  _speedCtl2 = false;
+    if (strCommand=="_s1on")   _speedCtl1 = true;
+    if (strCommand=="_s1off")  _speedCtl1 = false;
+    if (strCommand=="_s2on")   _speedCtl2 = true;
+    if (strCommand=="_s2off")  _speedCtl2 = false;
 
     // Interlocked if both speed controls are on
     bP12interlocked = _speedCtl1 && _speedCtl2;
@@ -328,7 +268,8 @@ void loop() {
   if (strCommand.length() > 0) {
 
     Serial.println("Cmd (len): " + strCommand + " (" + strCommand.length() + ")");
-    Serial.println("Q len: " + queue.size());
+    Serial.print("Q len: ");
+    Serial.println(queue.size());
 
     // Turn on the LED to indicate that command received
     lngLEDOnMillis = millis();
@@ -337,7 +278,7 @@ void loop() {
   }
   
   // Turn off the LED after a 1 second delay
-  if (bLEDOn && millis() > lngLEDOnMillis + 1000) {
+  if (bLEDOn && millis() > (lngLEDOnMillis + 1000)) {
     lngLEDOnMillis = 0;
     digitalWrite(LED_BUILTIN, LOW);
     bLEDOn = false;
@@ -367,25 +308,30 @@ void UpdateI2C() {
 
     // Broadcast current state
     if (strCommand.substring(0,2)=="p1" || strCommand.substring(0,2)=="p2") {
-   
-      Wire.beginTransmission(I2C_SpeedController);          // Transmit to SpeedController device
-      Wire.write(strCommand.c_str());                       // Send the C string array
+
+      strResponse = "_" + strCommand;
+
+      Wire.beginTransmission(I2C_Broadcast);          // Broadcast device
+      Wire.write(strResponse.c_str());                       // Send the C string array
       Wire.endTransmission();
       Serial.println(strResponse);
-      
+       
     }
 
     if (strCommand.substring(0,1)=="?") {
+      
       strResponse = "";
       
       if (strCommand.substring(0,3)=="?p1") strResponse = (_p1state == THROUGH)?"p1t":"p1d";
       if (strCommand.substring(0,3)=="?p2") strResponse = (_p2state == THROUGH)?"p2t":"p2d";
 
       if (strResponse.length() > 0) {
-        Wire.beginTransmission(I2C_SpeedController);          // Transmit to SpeedController device
-        Wire.write(strCommand.c_str());                       // Send the C string array
+
+        Wire.beginTransmission(I2C_Broadcast);          // Broadcast device
+        Wire.write(strResponse.c_str());                       // Send the C string array
         Wire.endTransmission();
         Serial.println(strResponse);
+     
       }
     }
     
@@ -554,12 +500,20 @@ void UpdateLEDs() {
 
   UpdateSignals();
 
-  // Shift out remote lights first (invert as common cathode)
-  shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, ~(_LEDstate[2]));
-  shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, ~(_LEDstate[1]));
+  //if (_LED_brightness_counter <= _LED_brightness) {
+    // Shift out remote lights first (invert as common cathode)
+    shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, ~(_LEDstate[1]));
+    shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, ~(_LEDstate[0]));
+  //} else {
+  //  // Shift out remote lights first (invert as common cathode)
+  //  shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, 0xFF);
+  //  shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, 0xFF);
+  //}
+  //_LED_brightness_counter++;
+  //if (_LED_brightness_counter>10) _LED_brightness_counter = 0;
   
   // Shift out MSB (7) first as outputs are 0-5
-  shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, _LEDstate[0]);
+  //shiftOut(_shiftDATA, _shiftCLOCK, MSBFIRST, _LEDstate[0]);
 
   digitalWrite(_shiftCLOCK, LOW);
   
